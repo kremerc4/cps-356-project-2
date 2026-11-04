@@ -1,14 +1,14 @@
 /*
  * Dining Philosophers Simulation
  *
- * Build: gcc -o diningPhilosophers diningPhilosophers.c -Wall -pthread
+ * Build: gcc -o diningPhilosophers main.c -Wall -pthread
  * Run:   ./diningPhilosophers
  *
  * No deadlock: even philosophers pick up their right fork first and odd
- * philosophers pick up their left fork first, which breaks circular wait.
+ * philosophers pick up their left fork first, which breaks circular wait
  *
  * No starvation: each fork works like a ticket lock, so philosophers get
- * the fork in the order they asked for it.
+ * the fork in the order they asked for it
  */
 
 #include <pthread.h>
@@ -16,17 +16,23 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+// set  number of philosophers
 #define N 5
-#define MAX_DELAY 800000     /* longest think or eat time, in microseconds */
-#define FRAME_DELAY 400000   /* pause after each table */
+// longest possible time (in ms) that a philosopher can spend in any state
+#define MAX_DELAY 800000
+// create artificial delay between states for better readability
+#define FRAME_DELAY 500000
 
+// define different philosopher states
 #define THINKING 0
 #define HUNGRY 1
 #define EATING 2
 #define DONE 3
 
+// use to keep track of free forks
 #define NO_ONE -1
 
+// struct for fork state
 typedef struct {
     pthread_mutex_t lock;
     pthread_cond_t cond;
@@ -34,25 +40,36 @@ typedef struct {
     int nowServing;
 } Fork;
 
+// initialize fork state array and pthreads
 Fork forks[N];
 pthread_mutex_t displayLock = PTHREAD_MUTEX_INITIALIZER;
 
+// keep track of key philosopher states
 int state[N];
 int meals[N];
 int forkOwner[N];
+
+// number of times each philosopher eats
 int cycles;
+
+// keeps track of how many state updates have occured
 int step = 0;
 
+// for formatted printing
 const char *stateNames[] = {"Thinking", "Hungry", "Eating", "Done"};
 
+// get left fork (from slides)
 int left(int p) {
     return p;
 }
 
+// get right fork (from slides)
 int right(int p) {
     return (p + 1) % N;
 }
 
+// logic for getting a fork when available
+// utilizes ticket style logic to avoid starvation
 void getFork(int f) {
     pthread_mutex_lock(&forks[f].lock);
     int myTicket = forks[f].nextTicket++;
@@ -62,6 +79,7 @@ void getFork(int f) {
     pthread_mutex_unlock(&forks[f].lock);
 }
 
+// logic for releasing a fork and increasing ticket so next person can get fork
 void putFork(int f) {
     pthread_mutex_lock(&forks[f].lock);
     forks[f].nowServing++;
@@ -69,16 +87,21 @@ void putFork(int f) {
     pthread_mutex_unlock(&forks[f].lock);
 }
 
-/* Call this only while holding displayLock. */
+// draw current state in formatted ascii display
+// call only while holding displayLock to ensure sequential printing
 void draw(const char *event, int p) {
+    // store each philosopher state for output
     char label[N][40];
 
+    // format each philosopher state
     for (int i = 0; i < N; i++) {
         sprintf(label[i], "Philosopher %d (%s) %d/%d",
                 i + 1, stateNames[state[i]], meals[i], cycles);
     }
 
     step++;
+
+    // print formatted ascii update to philosophers' states
     printf("\n--- Step %d: Philosopher %d %s ---\n\n", step, p + 1, event);
     printf("%22s%s\n", "", label[0]);
     printf("%14s[F1]%28s[F2]\n\n", "", "");
@@ -86,6 +109,7 @@ void draw(const char *event, int p) {
     printf("%14s[F5]%28s[F3]\n", "", "");
     printf("%-30s  [F4]  %s\n\n", label[3], label[2]);
 
+    // print fork statuses
     for (int f = 0; f < N; f++) {
         if (forkOwner[f] == NO_ONE) {
             printf("F%d: Available\n", f + 1);
@@ -93,15 +117,23 @@ void draw(const char *event, int p) {
             printf("F%d: In use by Philosopher %d\n", f + 1, forkOwner[f] + 1);
         }
     }
+
+    // ensure clean output
     fflush(stdout);
+
+    // delay after print (avoid clutter)
     usleep(FRAME_DELAY);
 }
 
+
 void pickUp(int p, int f) {
+    // store fork pick up state for output
     char event[32];
 
+    // get fork when available
     getFork(f);
 
+    // lock and print for consistent output
     pthread_mutex_lock(&displayLock);
     forkOwner[f] = p;
     sprintf(event, "picked up F%d", f + 1);
@@ -109,72 +141,93 @@ void pickUp(int p, int f) {
     pthread_mutex_unlock(&displayLock);
 }
 
+// logic for deciding which forks any philosopher should get
+// uses ordering based on even/odd philosopher to avoid deadlocks
 void getForks(int p) {
-    if (p % 2 == 0) {
+    if (p % 2 == 0) { // if even philosopher pick up right fork then left
         pickUp(p, right(p));
         pickUp(p, left(p));
-    } else {
+    } else { // if odd philosopher pick up left fork then right
         pickUp(p, left(p));
         pickUp(p, right(p));
     }
 }
 
+// logic for putting forks back after finished eating
 void putForks(int p) {
     pthread_mutex_lock(&displayLock);
+    
+    // reset owners
     forkOwner[left(p)] = NO_ONE;
     forkOwner[right(p)] = NO_ONE;
 
-    /* Unlock the forks first so a fork shown as Available is really free. */
+    // unlock forks so a fork shown as available is really free
     putFork(left(p));
     putFork(right(p));
 
-    if (meals[p] == cycles) {
+    // update philosopher's state
+    if (meals[p] == cycles) { // finished eating if has ate for number of cycles
         state[p] = DONE;
         draw("put down both forks and is done", p);
-    } else {
+    } else { // return to thinking if not ate for number of cycles
         state[p] = THINKING;
         draw("put down both forks", p);
     }
     pthread_mutex_unlock(&displayLock);
 }
 
+// simulate each philosopher's state
 void *philosopher(void *arg) {
+    // parse philosopher number from arg
     int p = *(int *) arg;
+
+    // get seed for rand (use different seed for each philosopher)
     unsigned int seed = p + 1;
 
+    // main state simulation
     for (int i = 0; i < cycles; i++) {
-        usleep(rand_r(&seed) % MAX_DELAY);    /* think */
+        // think for random amount of time (limited by max)
+        usleep(rand_r(&seed) % MAX_DELAY);
 
+        // when finished thinking, update state to hungry
         pthread_mutex_lock(&displayLock);
         state[p] = HUNGRY;
         draw("is hungry", p);
         pthread_mutex_unlock(&displayLock);
 
+        // get forks to eat
         getForks(p);
 
+        // when has both forks, start eating
         pthread_mutex_lock(&displayLock);
         state[p] = EATING;
         meals[p]++;
         draw("is eating", p);
         pthread_mutex_unlock(&displayLock);
 
-        usleep(rand_r(&seed) % MAX_DELAY);    /* eat */
+        // eat for random amount of time (limited by max)
+        usleep(rand_r(&seed) % MAX_DELAY);
 
+        // put back forks
         putForks(p);
     }
 
+    // return null to indicate finished
     return NULL;
 }
 
 int main(void) {
+    // initialize threads and ids
     pthread_t threads[N];
     int ids[N];
 
+    // scan in eat cycles (must be single integer and positive)
     if (scanf("%d", &cycles) != 1 || cycles <= 0) {
         printf("T must be a positive integer.\n");
         return 1;
     }
 
+    // initialize all states
     for (int i = 0; i < N; i++) {
         pthread_mutex_init(&forks[i].lock, NULL);
         pthread_cond_init(&forks[i].cond, NULL);
@@ -185,15 +238,18 @@ int main(void) {
         forkOwner[i] = NO_ONE;
     }
 
+    // start all philosopher cycles
     for (int i = 0; i < N; i++) {
         ids[i] = i;
         pthread_create(&threads[i], NULL, philosopher, &ids[i]);
     }
 
+    // join as each philosopher finishes each eatting cycle (philosopher function returns null)
     for (int i = 0; i < N; i++) {
         pthread_join(threads[i], NULL);
     }
 
+    // print that finished once all threads joined
     printf("\nAll philosophers are done.\n");
     return 0;
 }
