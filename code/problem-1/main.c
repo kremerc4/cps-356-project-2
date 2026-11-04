@@ -1,4 +1,10 @@
-/* Problem 1: Chef-Waiter system. */
+/*
+ * Chef-Waiter Restaurant System
+ *
+ * Build: gcc -o restaurant main.c -Wall -pthread
+ * Run:   ./restaurant
+ * Input: C W B M (chefs, waiters, buffer capacity, meals per chef)
+ */
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -9,84 +15,90 @@
 #define MAX_WAITERS 5
 #define MAX_CAPACITY 20
 
+// shared buffer and counters, protected by the mutex
 typedef struct {
     int meals[MAX_CAPACITY];
     int capacity, head, tail, count;
-    int meals_per_chef, active_chefs;
-    int prepared, served, max_usage;
+    int mealsPerChef, activeChefs;
+    int prepared, served, maxUsage;
     int aborted;
     pthread_mutex_t mutex;
-    pthread_cond_t not_empty;
-    pthread_cond_t not_full;
+    pthread_cond_t notEmpty;
+    pthread_cond_t notFull;
 } Restaurant;
 
+// data passed to each worker
 typedef struct {
     Restaurant *restaurant;
     int id;
 } Worker;
 
-static void *chef(void *argument)
-{
+// prepare and add meals to the buffer
+static void *chef(void *argument) {
     Worker *worker = argument;
     Restaurant *r = worker->restaurant;
 
-    for (int i = 0; i < r->meals_per_chef; ++i) {
+    for (int i = 0; i < r->mealsPerChef; ++i) {
         pthread_mutex_lock(&r->mutex);
-        /* Recheck space after each wakeup. */
+        // wait until the buffer has space
         while (r->count == r->capacity && !r->aborted)
-            pthread_cond_wait(&r->not_full, &r->mutex);
+            pthread_cond_wait(&r->notFull, &r->mutex);
         if (r->aborted) {
             pthread_mutex_unlock(&r->mutex);
             return NULL;
         }
 
+        // give each meal a unique ID and add it at the tail
         int meal = ++r->prepared;
         r->meals[r->tail] = meal;
         r->tail = (r->tail + 1) % r->capacity;
         ++r->count;
-        if (r->count > r->max_usage)
-            r->max_usage = r->count;
+        if (r->count > r->maxUsage)
+            r->maxUsage = r->count;
         printf("Chef %d prepared meal %d (buffer size = %d)\n",
                worker->id, meal, r->count);
-        pthread_cond_signal(&r->not_empty);
+        pthread_cond_signal(&r->notEmpty);
         pthread_mutex_unlock(&r->mutex);
     }
 
     pthread_mutex_lock(&r->mutex);
-    if (--r->active_chefs == 0)
-        /* Wake all waiters when the last chef finishes. */
-        pthread_cond_broadcast(&r->not_empty);
+    if (--r->activeChefs == 0)
+        // wake all waiters when the last chef finishes
+        pthread_cond_broadcast(&r->notEmpty);
     pthread_mutex_unlock(&r->mutex);
     return NULL;
 }
 
-static void *waiter(void *argument)
-{
+// take meals from the buffer and serve them
+static void *waiter(void *argument) {
     Worker *worker = argument;
     Restaurant *r = worker->restaurant;
 
     for (;;) {
         pthread_mutex_lock(&r->mutex);
-        while (r->count == 0 && r->active_chefs > 0 && !r->aborted)
-            pthread_cond_wait(&r->not_empty, &r->mutex);
-        if (r->aborted || (r->count == 0 && r->active_chefs == 0)) {
+        // wait for a meal while chefs are still working
+        while (r->count == 0 && r->activeChefs > 0 && !r->aborted)
+            pthread_cond_wait(&r->notEmpty, &r->mutex);
+        // stop when all meals are served or an error occurs
+        if (r->aborted || (r->count == 0 && r->activeChefs == 0)) {
             pthread_mutex_unlock(&r->mutex);
             return NULL;
         }
 
+        // remove the oldest meal
         int meal = r->meals[r->head];
         r->head = (r->head + 1) % r->capacity;
         --r->count;
         ++r->served;
         printf("Waiter %d served meal %d (buffer size = %d)\n",
                worker->id, meal, r->count);
-        pthread_cond_signal(&r->not_full);
+        pthread_cond_signal(&r->notFull);
         pthread_mutex_unlock(&r->mutex);
     }
 }
 
-static int read_input(int values[4])
-{
+// read and check the four input values
+static int readInput(int values[4]) {
     const long minimum[4] = {1, 1, 5, 1};
     const long maximum[4] = {5, 5, 20, 20};
     char token[64];
@@ -105,63 +117,67 @@ static int read_input(int values[4])
     return 1;
 }
 
-int main(void)
-{
+int main(void) {
     int input[4];
-    if (!read_input(input)) {
+    if (!readInput(input)) {
         fprintf(stderr, "Expected C W B M: C,W in 1..5, B in 5..20, M in 1..20.\n");
         return EXIT_FAILURE;
     }
 
+    // initialize the buffer and synchronization objects
     Restaurant r = {
-        .capacity = input[2], .meals_per_chef = input[3],
-        .active_chefs = input[0],
+        .capacity = input[2], .mealsPerChef = input[3],
+        .activeChefs = input[0],
         .mutex = PTHREAD_MUTEX_INITIALIZER,
-        .not_empty = PTHREAD_COND_INITIALIZER,
-        .not_full = PTHREAD_COND_INITIALIZER
+        .notEmpty = PTHREAD_COND_INITIALIZER,
+        .notFull = PTHREAD_COND_INITIALIZER
     };
     pthread_t chefs[MAX_CHEFS], waiters[MAX_WAITERS];
-    Worker chef_args[MAX_CHEFS], waiter_args[MAX_WAITERS];
-    int chefs_started = 0, waiters_started = 0, error = 0;
+    Worker chefArgs[MAX_CHEFS], waiterArgs[MAX_WAITERS];
+    int chefsStarted = 0, waitersStarted = 0, error = 0;
 
+    // start the waiters and chefs
     for (int i = 0; i < input[1]; ++i) {
-        waiter_args[i] = (Worker){&r, i + 1};
-        error = pthread_create(&waiters[i], NULL, waiter, &waiter_args[i]);
+        waiterArgs[i] = (Worker){&r, i + 1};
+        error = pthread_create(&waiters[i], NULL, waiter, &waiterArgs[i]);
         if (error != 0)
-            goto creation_failed;
-        ++waiters_started;
+            goto creationFailed;
+        ++waitersStarted;
     }
     for (int i = 0; i < input[0]; ++i) {
-        chef_args[i] = (Worker){&r, i + 1};
-        error = pthread_create(&chefs[i], NULL, chef, &chef_args[i]);
+        chefArgs[i] = (Worker){&r, i + 1};
+        error = pthread_create(&chefs[i], NULL, chef, &chefArgs[i]);
         if (error != 0)
-            goto creation_failed;
-        ++chefs_started;
+            goto creationFailed;
+        ++chefsStarted;
     }
-    goto join_workers;
+    goto joinWorkers;
 
-creation_failed:
+creationFailed:
+    // stop any workers that already started
     fprintf(stderr, "Cannot create worker thread: %s\n", strerror(error));
     pthread_mutex_lock(&r.mutex);
     r.aborted = 1;
-    pthread_cond_broadcast(&r.not_empty);
-    pthread_cond_broadcast(&r.not_full);
+    pthread_cond_broadcast(&r.notEmpty);
+    pthread_cond_broadcast(&r.notFull);
     pthread_mutex_unlock(&r.mutex);
 
-join_workers:
-    for (int i = 0; i < chefs_started; ++i)
+joinWorkers:
+    // wait for all started workers to finish
+    for (int i = 0; i < chefsStarted; ++i)
         pthread_join(chefs[i], NULL);
-    for (int i = 0; i < waiters_started; ++i)
+    for (int i = 0; i < waitersStarted; ++i)
         pthread_join(waiters[i], NULL);
 
+    // print the summary after all workers finish
     if (error == 0) {
         printf("\nExecution Summary\n");
         printf("Total meals prepared: %d\n", r.prepared);
         printf("Total meals served: %d\n", r.served);
-        printf("Maximum buffer usage: %d\n", r.max_usage);
+        printf("Maximum buffer usage: %d\n", r.maxUsage);
     }
-    pthread_cond_destroy(&r.not_full);
-    pthread_cond_destroy(&r.not_empty);
+    pthread_cond_destroy(&r.notFull);
+    pthread_cond_destroy(&r.notEmpty);
     pthread_mutex_destroy(&r.mutex);
     return error == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
