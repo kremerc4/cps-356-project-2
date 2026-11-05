@@ -16,9 +16,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-// set  number of philosophers
+// set  number of philosophers, for project example valid numbers of N are: 5, 6, 7
 #define N 5
-// longest possible time (in ms) that a philosopher can spend in any state
+// longest possible time (in microseconds) that a philosopher can spend in any state
 #define MAX_DELAY 800000
 // create artificial delay between states for better readability
 #define FRAME_DELAY 500000
@@ -101,13 +101,35 @@ void draw(const char *event, int p) {
 
     step++;
 
-    // print formatted ascii update to philosophers' states
-    printf("\n--- Step %d: Philosopher %d %s ---\n\n", step, p + 1, event);
-    printf("%22s%s\n", "", label[0]);
-    printf("%14s[F1]%28s[F2]\n\n", "", "");
-    printf("%-38s%s\n\n", label[4], label[1]);
-    printf("%14s[F5]%28s[F3]\n", "", "");
-    printf("%-30s  [F4]  %s\n\n", label[3], label[2]);
+    if (N == 5) {
+        // print formatted ascii update to philosophers' states
+        printf("\n--- Step %d: Philosopher %d %s ---\n\n", step, p + 1, event);
+        printf("%22s%s\n", "", label[0]);
+        printf("%14s[F1]%28s[F2]\n\n", "", "");
+        printf("%-38s%s\n\n", label[4], label[1]);
+        printf("%14s[F5]%28s[F3]\n", "", "");
+        printf("%-30s  [F4]  %s\n\n", label[3], label[2]);
+    } else if (N == 6) {
+        // print formatted ascii update to philosophers' states
+        printf("\n--- Step %d: Philosopher %d %s ---\n\n", step, p + 1, event);
+        printf("%-30s  [F2]  %s\n\n", label[0], label[1]);
+        printf("%14s[F1]%28s[F3]\n\n", "", "");
+        printf("%-38s%s\n\n", label[5], label[2]);
+        printf("%14s[F6]%28s[F4]\n", "", "");
+        printf("%-30s  [F5]  %s\n\n", label[4], label[3]);
+    } else if (N == 7) {
+        // print formatted ascii update to philosophers' states
+        printf("\n--- Step %d: Philosopher %d %s ---\n\n", step, p + 1, event);
+        printf("%22s%s\n", "", label[0]);
+        printf("%14s[F1]%28s[F2]\n\n", "", "");
+        printf("%-38s%s\n\n", label[6], label[1]);
+        printf("%14s[F7]%28s[F3]\n", "", "");
+        printf("%-38s%s\n\n", label[5], label[2]);
+        printf("%14s[F6]%28s[F4]\n", "", "");
+        printf("%-30s  [F5]  %s\n\n", label[4], label[3]);
+    } else {
+        printf("INVALID NUMBER OF PHILOSOPHERS");
+    }
 
     // print fork statuses
     for (int f = 0; f < N; f++) {
